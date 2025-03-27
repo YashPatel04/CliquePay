@@ -9,9 +9,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Button } from "../components/ui/button";
 import Loading from '../components/Loading';
 import { SecurityUtils } from '../utils/security';
-import { Users, UserPlus, Search, CreditCard, ArrowLeftFromLineIcon     
-    
- } from "lucide-react";
+import { Users, UserPlus, Search, CreditCard, ArrowLeftFromLineIcon, X, UserMinus, UserX } from "lucide-react";
+import { set } from 'zod';
 
 // Simple Logo component
 const Logo = () => (
@@ -127,8 +126,11 @@ const Content = () => {
     const [blocked, setBlocked] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [searchResults, setSearchResults] = useState([]);
-    const [hasSearched, setHasSearched] = useState(false);
+        const [hasSearched, setHasSearched] = useState(false);
     const [requestedUsers, setRequestedUsers] = useState([]);
+    const [showRemoveModal, setShowRemoveModal] = useState(false);
+    const [friendToRemove, setFriendToRemove] = useState(null);
+    const [sentRequests, setSentRequests] = useState([]);
     const navigate = useNavigate();
 
     const fetchUserProfile = async () => {
@@ -182,22 +184,36 @@ const Content = () => {
     };
 
     const sortFriendships = (friendships) => {
-        const friends = [];
-        const requests = [];
-        const blocked = [];
-        friendships.forEach(friendship => {
-            if (friendship.status === 'accepted' || friendship.status === 'ACCEPTED') {
-                friends.push(friendship);
-            } else if (friendship.status === 'pending' || friendship.status === 'PENDING') {
-                requests.push(friendship);
-            } else if (friendship.status === 'blocked' || friendship.status === 'BLOCKED') {
-                blocked.push(friendship);
-            }
-
-        });
-        setFriends(friends);    
-        setRequests(requests);
-        setBlocked(blocked);
+      const friends = [];
+      const requests = [];
+      const sentRequests = []; 
+      const blocked = [];
+      
+      const currentUserId = profileData?.id;
+      console.log("Current user ID:", currentUserId);
+      
+      friendships.forEach(friendship => {
+        console.log(`Friendship ${friendship.friendship_id}: Initiator=${friendship.initiator}, Current User=${currentUserId}`);
+        
+        if (friendship.status === 'accepted' || friendship.status === 'ACCEPTED') {
+          friends.push(friendship);
+        } 
+        else if (friendship.status === 'pending' || friendship.status === 'PENDING') {
+          if (friendship.initiator === currentUserId) {
+            sentRequests.push(friendship); // Outgoing request
+          } else {
+            requests.push(friendship); // Incoming request
+          }
+        } 
+        else if (friendship.status === 'blocked' || friendship.status === 'BLOCKED') {
+          blocked.push(friendship);
+        }
+      });
+      
+      setFriends(friends);    
+      setRequests(requests); // Only incoming requests
+      setSentRequests(sentRequests); // Store outgoing requests separately
+      setBlocked(blocked);
     };
 
     useEffect(() => {
@@ -249,7 +265,7 @@ const Content = () => {
         }
     };
 
-    const handleRequest = async (username) => {
+    const handleRequest = async (friend, username) => {
         try {
             const token = await SecurityUtils.getCookie('idToken');
             if (!token) {
@@ -269,25 +285,93 @@ const Content = () => {
             });
             const data = await response.json();
             if (data.status === 'SUCCESS') {
-                // Don't add to requests array since this is an OUTGOING request
-                // Just keep it in requestedUsers for button state
-            } else if (data.status === 'PENDING') {
-                // Request was already pending, keep in requested users
+                setSentRequests(prev => [...prev, friend]);
             } else {
                 // On error, remove from requested users
-                setRequestedUsers(prev => prev.filter(u => u !== username));
+                setSentRequests(prev => prev.filter(u => u !== friend));
                 setError(data.message || 'Failed to send friend request');
             }
         } catch (error) {
             // On exception, remove from requested users
-            setRequestedUsers(prev => prev.filter(u => u !== username));
+            setSentRequests(prev => prev.filter(u => u !== friend));
             console.error('Error sending friend request:', error);
             setError('Error sending friend request');
         }
     };
 
-    const handleRemoveFriend = () => {
-      setFriends(friends.filter(friend => friend.id !== id));
+    const handleRemoveFriendClick = (friend) => {
+        setFriendToRemove(friend);
+        setShowRemoveModal(true);
+    };
+
+    const handleRemoveFriend = async () => {
+        if (!friendToRemove) return;
+        
+        try {
+          const token = await SecurityUtils.getCookie('idToken');
+          if (!token) {
+            setError('No authentication token found');
+            return;
+          }
+          
+          const response = await fetch(`${API_URL}/remove-friend/`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ 
+              id_token: token, 
+              friendship_id: friendToRemove.friendship_id ,
+              block: false
+            })
+          });
+          
+          const data = await response.json();
+          if (data.status === 'SUCCESS') {
+            setFriends(friends.filter(f => f.friend_id !== friendToRemove.friend_id));
+            setShowRemoveModal(false);
+          } else {
+            setError(data.message || 'Failed to remove friend');
+          }
+        } catch (error) {
+          console.error('Error removing friend:', error);
+          setError('Error removing friend');    
+        }
+    };
+
+    const handleRemoveAndBlockFriend = async () => {
+        if (!friendToRemove) return;
+        
+        try {
+          const token = await SecurityUtils.getCookie('idToken');
+          if (!token) {
+            setError('No authentication token found');
+            return;
+          }
+          
+          const response = await fetch(`${API_URL}/remove-friend/`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ 
+              id_token: token, 
+              friendship_id: friendToRemove.friendship_id,
+              block: true 
+            })
+          });
+          
+          const data = await response.json();
+          if (data.status === 'SUCCESS') {
+            setFriends(friends.filter(f => f.friend_id !== friendToRemove.friend_id));
+            setShowRemoveModal(false);
+          } else {
+            setError(data.message || 'Failed to remove and block friend');
+          }
+        } catch (error) {
+          console.error('Error removing and blocking friend:', error);
+          setError('Error removing and blocking friend');
+        }
     };
 
     const handleAcceptRequest = async (friend) => {
@@ -347,10 +431,36 @@ const Content = () => {
         navigate('/dashboard');
     };
 
+    const handleCancelRequest = async (request) => {
+        try {
+            const token = await SecurityUtils.getCookie('idToken');
+            if (!token) {
+                setError('No authentication token found');
+                return;
+            }
+            const response = await fetch(`${API_URL}/reject-friend-request/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ id_token: token, request_id: request.friendship_id })
+            });
+          
+          const data = await response.json();
+          if (data.status === 'SUCCESS') {
+            setSentRequests(sentRequests.filter(req => req.friendship_id !== request.friendship_id));
+          } else {
+            setError(data.message || 'Failed to cancel friend request');
+          }
+        } catch (error) {
+          console.error('Error canceling friend request:', error);
+          setError('Error canceling friend request');
+        }
+      };
+
     const handleSearchTermChange = (e) => {
         setSearchTerm(e.target.value);
-        // Uncomment the line below if you want to hide results as soon as typing starts
-        // setHasSearched(false);
+        setHasSearched(false);
     };
 
     if (error) {
@@ -413,18 +523,40 @@ const Content = () => {
 
                 {/* Tabs for Friends, Requests, Search */}
                 <Tabs defaultValue="friends" className="w-full">
-                    <TabsList className="grid grid-cols-3 mb-8 bg-zinc-800 border border-zinc-700">
-                        <TabsTrigger value="friends" className="data-[state=active]:bg-purple-600 data-[state=active]:text-white">
-                            <Users className="h-4 w-4 mr-2" />
-                            <span>Friends</span>
+                    <TabsList className="grid grid-cols-4 mb-8 bg-zinc-800 border border-zinc-700">
+                        <TabsTrigger 
+                            value="friends"
+                            className="data-[state=active]:bg-purple-600 data-[state=active]:text-white"
+                        >
+                            Friends
                         </TabsTrigger>
-                        <TabsTrigger value="requests" className="data-[state=active]:bg-purple-600 data-[state=active]:text-white">
-                            <UserPlus className="h-4 w-4 mr-2" />
-                            <span>Requests</span>
+                        <TabsTrigger 
+                            value="requests"
+                            className="data-[state=active]:bg-purple-600 data-[state=active]:text-white"
+                        >
+                            Requests
+                            {requests.length > 0 && (
+                            <span className="ml-1.5 bg-purple-600 text-white text-xs rounded-full h-5 min-w-5 flex items-center justify-center">
+                                {requests.length}
+                            </span>
+                            )}
                         </TabsTrigger>
-                        <TabsTrigger value="search" className="data-[state=active]:bg-purple-600 data-[state=active]:text-white">
-                            <Search className="h-4 w-4 mr-2" />
-                            <span>Search</span>
+                        <TabsTrigger 
+                            value="sent"
+                            className="data-[state=active]:bg-purple-600 data-[state=active]:text-white"
+                        >
+                            Sent
+                            {sentRequests.length > 0 && (
+                            <span className="ml-1.5 bg-zinc-700 text-white text-xs rounded-full h-5 min-w-5 flex items-center justify-center">
+                                {sentRequests.length}
+                            </span>
+                            )}
+                        </TabsTrigger>
+                        <TabsTrigger 
+                            value="search"
+                            className="data-[state=active]:bg-purple-600 data-[state=active]:text-white"
+                        >
+                            Search
                         </TabsTrigger>
                     </TabsList>
 
@@ -447,7 +579,7 @@ const Content = () => {
                                             name={friend.friend_name}
                                             email={friend.email}
                                             imgSrc={friend.profile_photo}
-                                            onRemove={() => handleRemoveFriend(friend.id)}
+                                            onRemove={() => handleRemoveFriendClick(friend)}
                                         />
                                     ))
                                 )}
@@ -508,9 +640,7 @@ const Content = () => {
                                 </form>
                                 
                                 <div className="space-y-4">
-                                    {/* Only show results or messages if hasSearched is true */}
-                                    {hasSearched && (
-                                        searchResults.length > 0 ? (
+                                        {searchResults.length > 0 ? 
                                             searchResults.map(result => (
                                                 !result.is_friend ? (
                                                     <SearchCard 
@@ -518,23 +648,114 @@ const Content = () => {
                                                         name={result.full_name}
                                                         username={result.username}
                                                         imgSrc={result.profile_photo}
-                                                        onRequest={() => handleRequest(result.username)}
+                                                        onRequest={() => handleRequest(result, result.username)}
                                                         isRequested={requestedUsers.includes(result.username)}
                                                     />
                                                 ) : null
                                             ))
-                                        ) : (
+                                        : hasSearched && (
                                             <p className="text-center text-zinc-400 py-4">
                                                 No results found for "{searchTerm}"
                                             </p>
-                                        )
-                                    )}
+                                        )}
+                                         
+
+                                            
                                 </div>
                             </CardContent>
                         </Card>
                     </TabsContent>
+
+                    <TabsContent value="sent" className="space-y-4">
+                      <Card className="bg-zinc-900 border-zinc-800">
+                        <CardHeader>
+                          <CardTitle>Sent Requests</CardTitle>
+                          <CardDescription className="text-gray-400">
+                            You have {sentRequests.length} pending outgoing requests
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          {sentRequests.length === 0 ? (
+                            <p className="text-center text-zinc-400 py-4">You haven't sent any friend requests yet.</p>
+                          ) : (
+                            sentRequests.map(request => (
+                              <div key={request.friendship_id} className="flex items-center justify-between p-4 bg-zinc-800 rounded-lg">
+                                <div className="flex items-center gap-3">
+                                  <Avatar>
+                                    <AvatarImage src={request.profile_photo} alt={request.friend_name} />
+                                    <AvatarFallback className="bg-purple-900/50 text-white">
+                                      {request.friend_name?.split(" ").map(n => n[0]).join("")}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <div>
+                                    <p className="font-medium text-white">{request.friend_name}</p>
+                                    <p className="text-sm text-zinc-400">Request pending</p>
+                                  </div>
+                                </div>
+                                <Button 
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-zinc-700 hover:bg-zinc-700"
+                                  onClick={() => handleCancelRequest(request)}
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            ))
+                          )}
+                        </CardContent>
+                      </Card>
+                    </TabsContent>
                 </Tabs>
             </Section>
+
+            {showRemoveModal && friendToRemove && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-md shadow-xl">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-bold text-white">Remove Friend</h2>
+                            <button 
+                            onClick={() => setShowRemoveModal(false)}
+                            className="text-zinc-400 hover:text-white"
+                            >
+                            <X className="h-5 w-5" />
+                            </button>
+                        </div>
+                        
+                        <div className="mb-6">
+                            <p className="text-zinc-300">
+                            Do you want to remove <span className="text-purple-400 font-semibold">{friendToRemove.friend_name}</span> from your friends list or remove and block them?
+                            </p>
+                        </div>
+
+                        <div className="flex flex-col gap-3 mt-6">
+                            <Button 
+                            onClick={handleRemoveFriend}
+                            className="bg-zinc-800 hover:bg-zinc-700 text-white w-full flex items-center justify-center"
+                            >
+                            <UserMinus className="h-4 w-4 mr-2" />
+                            Remove Friend
+                            </Button>
+                            
+                            <Button 
+                            onClick={handleRemoveAndBlockFriend}
+                            className="bg-red-900/80 hover:bg-red-800 text-white w-full flex items-center justify-center"
+                            >
+                            <UserX className="h-4 w-4 mr-2" />
+                            Remove and Block
+                            </Button>
+                            
+                            <Button 
+                            onClick={() => setShowRemoveModal(false)} 
+                            variant="outline"
+                            className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 w-full"
+                            >
+                            Cancel
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </PageLayout>
     );
 };
