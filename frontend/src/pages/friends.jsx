@@ -286,20 +286,61 @@ const Content = () => {
         }
     };
 
-    const handleRemoveFriend = (id) => {
+    const handleRemoveFriend = () => {
       setFriends(friends.filter(friend => friend.id !== id));
     };
 
-    const handleAcceptRequest = (id) => {
-      const accepted = requests.find(req => req.id === id);
-      if (accepted) {
-        setFriends([...friends, accepted]);
-        setRequests(requests.filter(req => req.id !== id));
-      }
+    const handleAcceptRequest = async (friend) => {
+        try {
+            const token = await SecurityUtils.getCookie('idToken');
+            if (!token) {
+                setError('No authentication token found');
+                return;
+            }
+            const response = await fetch(`${API_URL}/accept-friend-request/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ id_token: token, request_id: friend.friendship_id })
+            });
+            const data = await response.json();
+            if (data.status === 'SUCCESS') {
+                setFriends([...friends, friend]);
+                setRequests(requests.filter(req => req.friendship_id !== friend.friendship_id));
+            } else {
+                setError(data.message || 'Failed to accept friend request');
+            }
+        } 
+        catch (error) {
+            console.error('Error accepting friend request:', error);
+        }
+        
     };
 
-    const handleDeclineRequest = (id) => {
-      setRequests(requests.filter(req => req.id !== id));
+    const handleDeclineRequest = async (friend) => {
+        try{
+            const token = await SecurityUtils.getCookie('idToken');
+            if (!token) {
+                setError('No authentication token found');
+                return;
+            }
+            const response = await fetch(`${API_URL}/reject-friend-request/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ id_token: token, request_id: friend.friendship_id })
+            });
+            const data = await response.json();
+            if (data.status === 'SUCCESS') {
+                setRequests(requests.filter(req => req.friendship_id !== friend.friendship_id));
+            } else {
+                setError(data.message || 'Failed to decline friend request');
+            }
+        } catch(error){
+            console.error('Error declining friend request:', error);
+        }
     };
 
     const handleDashboardClick = () => {
@@ -429,13 +470,13 @@ const Content = () => {
                                 ) : (
                                     requests.map(request => (
                                         <RequestCard 
-                                            key={request.friend_id}
+                                            key={request.friendship_id}
                                             name={request.friend_name}
                                             email={request.email}
                                             imgSrc={request.profile_photo}
-                                            onAccept={() => handleAcceptRequest(request.id)}
-                                            onDecline={() => handleDeclineRequest(request.id)}
-                                        />
+                                            onAccept={() => handleAcceptRequest(request)}
+                                            onDecline={() => handleDeclineRequest(request)}
+                                        />  
                                     ))
                                 )}
                             </CardContent>
