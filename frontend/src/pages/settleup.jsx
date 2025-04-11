@@ -52,7 +52,7 @@ const SettleUpModal = ({ onClose, onConfirm, amount, isProcessing, onSuccess, se
                 amount: settlement.amount,
                 description: `Settling up with ${settlement.name}`
               };
-              conconsle.log('Specific payment data:', specificPayment);
+              console.log('Specific payment data:', specificPayment);
 
               // Make the API call for this specific settlement
               const response = await fetch(`${API_URL}/record-payment/`, {
